@@ -17,11 +17,14 @@ class MemoryChatRepository implements ChatRepositoryContract {
   private readonly chats = new Map<string, UserChatSummary>();
   private readonly pairToChatId = new Map<string, string>();
   private nextId = 1;
+  failCreate = false;
+  failList = false;
 
   async createOrGetDirectChat(
     userLowId: string,
     userHighId: string,
   ): Promise<CreateDirectChatResult> {
+    if (this.failCreate) throw new Error('database connection string must not leak');
     const missing = [userLowId, userHighId].filter((userId) => !this.users.has(userId));
     if (missing.length > 0) throw new UserNotFoundError(missing);
 
@@ -40,6 +43,7 @@ class MemoryChatRepository implements ChatRepositoryContract {
   }
 
   async listUserChats(userId: string): Promise<UserChatSummary[]> {
+    if (this.failList) throw new Error('database credentials must not leak');
     if (!this.users.has(userId)) throw new UserNotFoundError([userId]);
     return [...this.chats.values()].filter((chat) => chat.participantIds.includes(userId));
   }
@@ -117,6 +121,34 @@ test('POST /api/chat/create rejects identical user IDs', async () => {
     const body = (await response.json()) as { error: { message: string } };
     assert.equal(body.error.message, 'Request validation failed');
   });
+});
+
+test('PostgreSQL failures return safe generic server errors', async () => {
+  const repository = new MemoryChatRepository();
+  const app = createApp(new ChatService(repository));
+  const server = app.listen(0);
+  await once(server, 'listening');
+  const address = server.address() as AddressInfo;
+
+  try {
+    repository.failCreate = true;
+    const create = await fetch(`http://127.0.0.1:${address.port}/api/chat/create`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userAId: 'alice', userBId: 'bob' }),
+    });
+    assert.equal(create.status, 500);
+    assert.doesNotMatch(await create.text(), /connection string/);
+
+    repository.failCreate = false;
+    repository.failList = true;
+    const list = await fetch(`http://127.0.0.1:${address.port}/api/user/alice/chats`);
+    assert.equal(list.status, 500);
+    assert.doesNotMatch(await list.text(), /credentials/);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
 });
 
 test('concurrent duplicate requests, including reversed IDs, return one chat ID', async () => {

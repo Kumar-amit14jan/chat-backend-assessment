@@ -3,8 +3,14 @@ import { env } from './env';
 
 function initializeFirebase(): App | null {
   if (!env.FIREBASE_PROJECT_ID || !env.FIREBASE_CLIENT_EMAIL || !env.FIREBASE_PRIVATE_KEY) {
-    console.info('Firebase Admin is not configured; skipping initialization.');
-    return null;
+    if (!process.env.FIRESTORE_EMULATOR_HOST) {
+      console.info('Firebase Admin is not configured; skipping initialization.');
+      return null;
+    }
+
+    return initializeApp({
+      projectId: env.FIREBASE_PROJECT_ID ?? process.env.GCLOUD_PROJECT ?? 'chat-backend-assessment',
+    });
   }
 
   const existingApp = getApps()[0];

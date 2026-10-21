@@ -1,6 +1,10 @@
-# Chat Backend Assessment — Phase 4
+# Chat Backend Assessment — Phase 5 Audit
 
 Backend foundation with direct chats, Firestore-backed messaging, read receipts, and last-seen progress. Group chats and delivery/read-receipt APIs beyond per-message read status are not implemented.
+
+## Authentication and security scope
+
+This assessment does **not** define or implement authentication endpoints, login, token issuance, or authentication middleware. User IDs supplied in request bodies, URL paths, or the `x-user-id` header are caller-controlled values and are **not secure authentication**. Membership checks enforce application-level access against those supplied IDs, but an unauthenticated caller can impersonate another ID. Do not deploy this API as production-secure or expose it to untrusted clients until a verified authentication layer derives the user ID from a validated credential and binds it to every request. The existing `User.firebaseUid` field does not by itself authenticate requests.
 
 ## Requirements
 
@@ -37,7 +41,7 @@ The API listens on `http://localhost:3000` by default. Set `PORT` in `.env` to c
 
 ## Chat and messaging endpoints
 
-- `POST /api/chat/create` with JSON `{ "userAId": "...", "userBId": "..." }` creates or returns the same direct-chat ID. Both users must exist and must differ.
+- `POST /api/chat/create` with JSON `{ "userAId": "...", "userBId": "..." }` creates or returns the same direct-chat ID. Both users must exist and must differ. Returns 200 for both new and existing chats.
 - `GET /api/user/:userId/chats` returns `{ "chats": [{ "chatId": "...", "participantIds": ["...", "..."] }] }`. A valid user without chats receives an empty array.
 - `POST /api/chat/:chatId/message/send` with JSON `{ "senderId": "...", "text": "Hello" }` stores the trimmed message in Firestore and returns `{ "messageId": "...", "timestamp": "..." }`.
 - `GET /api/chat/:chatId/messages?limit=50&cursor=...` requires an `x-user-id` header. It returns chronological messages plus `nextCursor`; limit is 1–100 and timestamp ties are ordered by Firestore document ID.
@@ -45,9 +49,29 @@ The API listens on `http://localhost:3000` by default. Set `PORT` in `.env` to c
 - `POST /api/chat/:chatId/lastseen` with JSON `{ "userId": "...", "messageId": "..." }` advances the user's Firestore last-seen state. Transactions prevent progress from moving backward; ties use message ID ordering.
 - `GET /api/health` checks API and PostgreSQL availability.
 
-Direct-chat user IDs are canonicalized, and PostgreSQL enforces both canonical ordering and a unique composite pair. Concurrent requests therefore converge on one row. Chat creation, participant insertion, and user validation run in one database transaction.
+Direct-chat user IDs are canonicalized, and PostgreSQL enforces a unique composite pair. Concurrent requests therefore converge on one row. Chat creation, participant insertion, and user validation run in one database transaction. PostgreSQL is the source of truth for users, chats, and chat participants. Firestore stores message documents, per-message read receipts, and last-seen state only; message content and receipt state are not written to PostgreSQL.
 
-Message documents are stored only in Firestore under `chats/{chatId}/messages`; message bodies, receipts, and last-seen state are not persisted in PostgreSQL. Firebase Admin is configured through the optional service-account environment values described above. For the list endpoint, `x-user-id` is expected to be set by a trusted authentication layer; this project does not yet add authentication middleware.
+Message documents are stored only in Firestore under `chats/{chatId}/messages`. Firebase Admin is configured through the optional service-account environment values described above. In the current implementation, no trusted authentication layer sets `x-user-id`; it is simply a client-supplied identifier and must not be treated as proof of identity.
+
+## Firestore Emulator integration test
+
+The default test suite includes an integration test that is skipped unless `FIRESTORE_EMULATOR_HOST` is set. To run it against the Firebase Emulator Suite, start the Firestore emulator in one terminal (Firebase CLI required):
+
+```powershell
+firebase emulators:start --only firestore --project demo-chat-backend
+```
+
+Then run the tests in another PowerShell terminal:
+
+```powershell
+$env:FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080"
+$env:GCLOUD_PROJECT = "demo-chat-backend"
+npm test
+Remove-Item Env:FIRESTORE_EMULATOR_HOST
+Remove-Item Env:GCLOUD_PROJECT
+```
+
+The emulator test verifies persisted message ordering and cursor pagination, repeatable read receipts, and monotonic last-seen state. It uses a unique chat document and removes its data afterward. Without the emulator variable, HTTP tests run against in-memory repositories and the emulator test is reported as skipped.
 
 Example requests:
 
@@ -86,7 +110,7 @@ npm run lint
 npm run format:check
 ```
 
-Route tests use an in-memory repository and do not require PostgreSQL. Applying the migration and exercising the real persistence layer do require a reachable PostgreSQL instance and valid credentials in `.env`.
+Route tests use in-memory repositories and do not require PostgreSQL. The Firestore integration test requires the emulator as described above. Applying the migration and exercising real PostgreSQL persistence require a reachable PostgreSQL instance and valid credentials in `.env`.
 
 For a production build and run:
 

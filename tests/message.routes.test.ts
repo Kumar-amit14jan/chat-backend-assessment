@@ -34,6 +34,8 @@ class MemoryMessageRepository implements MessageRepositoryContract {
   private readonly chatForMessage = new Map<string, string>();
   failCreate = false;
   failList = false;
+  failMarkRead = false;
+  failUpdateLastSeen = false;
   private nextId = 1;
 
   async create(chatId: string, senderId: string, text: string): Promise<ChatMessage> {
@@ -92,6 +94,7 @@ class MemoryMessageRepository implements MessageRepositoryContract {
   }
 
   async markRead(chatId: string, messageId: string, userId: string): Promise<{ readAt: string }> {
+    if (this.failMarkRead) throw new Error('Firestore receipt write failed');
     const message = this.messages.find(
       (item) => item.messageId === messageId && this.chatForMessage.get(item.messageId) === chatId,
     );
@@ -107,6 +110,7 @@ class MemoryMessageRepository implements MessageRepositoryContract {
     messageId: string,
     userId: string,
   ): Promise<{ lastSeenMessageId: string; lastSeenAt: string; updated: boolean }> {
+    if (this.failUpdateLastSeen) throw new Error('Firestore last-seen write failed');
     const message = this.messages.find(
       (item) => item.messageId === messageId && this.chatForMessage.get(item.messageId) === chatId,
     );
@@ -182,6 +186,32 @@ test('message sending rejects empty or whitespace-only text', async () => {
   });
 });
 
+test('malformed JSON receives a safe 400 response', async () => {
+  await withMessageServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/chat/chat1/message/send`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{invalid json',
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: { message: 'Invalid JSON request body' },
+    });
+  });
+});
+
+test('message listing requires a user ID and rejects malformed cursors', async () => {
+  await withMessageServer(async (baseUrl) => {
+    const missingUser = await fetch(`${baseUrl}/api/chat/chat1/messages`);
+    assert.equal(missingUser.status, 400);
+
+    const invalidCursor = await fetch(`${baseUrl}/api/chat/chat1/messages?cursor=not-a-cursor`, {
+      headers: { 'x-user-id': 'alice' },
+    });
+    assert.equal(invalidCursor.status, 400);
+  });
+});
+
 test('message endpoints reject malformed and unknown chat IDs', async () => {
   await withMessageServer(async (baseUrl) => {
     const malformed = await fetch(`${baseUrl}/api/chat/bad%21/messages`, {
@@ -227,6 +257,34 @@ test('Firestore failures return 503 for writes and reads', async () => {
       headers: { 'x-user-id': 'alice' },
     });
     assert.equal(read.status, 503);
+  });
+});
+
+test('Firestore receipt and last-seen failures return safe 503 responses', async () => {
+  await withMessageServer(async (baseUrl, repository) => {
+    repository.seed('chat1', {
+      messageId: 'message-failure',
+      senderId: 'alice',
+      text: 'hello',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    });
+    repository.failMarkRead = true;
+    const receiptResponse = await fetch(`${baseUrl}/api/chat/chat1/message/message-failure/read`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'alice' }),
+    });
+    assert.equal(receiptResponse.status, 503);
+    assert.doesNotMatch(await receiptResponse.text(), /Firestore receipt write failed/);
+
+    repository.failUpdateLastSeen = true;
+    const lastSeenResponse = await fetch(`${baseUrl}/api/chat/chat1/lastseen`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'alice', messageId: 'message-failure' }),
+    });
+    assert.equal(lastSeenResponse.status, 503);
+    assert.doesNotMatch(await lastSeenResponse.text(), /Firestore last-seen write failed/);
   });
 });
 
@@ -393,5 +451,38 @@ test('last-seen progress cannot move backward', async () => {
     assert.equal(unchanged.lastSeenMessageId, 'message-late');
     assert.equal(unchanged.updated, false);
     assert.equal(repository.lastSeen.get('chat1:alice')?.messageId, 'message-late');
+  });
+});
+
+test('last-seen uses message ID ordering to keep equal-timestamp progress monotonic', async () => {
+  await withMessageServer(async (baseUrl, repository) => {
+    repository.seed('chat1', {
+      messageId: 'message-a',
+      senderId: 'alice',
+      text: 'earlier tie-breaker',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    });
+    repository.seed('chat1', {
+      messageId: 'message-z',
+      senderId: 'bob',
+      text: 'later tie-breaker',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    });
+
+    const postLastSeen = (messageId: string) =>
+      fetch(`${baseUrl}/api/chat/chat1/lastseen`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'alice', messageId }),
+      });
+
+    await postLastSeen('message-z');
+    const regressed = await postLastSeen('message-a');
+    const state = (await regressed.json()) as {
+      lastSeenMessageId: string;
+      updated: boolean;
+    };
+    assert.equal(state.lastSeenMessageId, 'message-z');
+    assert.equal(state.updated, false);
   });
 });
