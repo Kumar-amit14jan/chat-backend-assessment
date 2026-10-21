@@ -8,9 +8,38 @@ datasource db {
 }
 
 model User {
-  id         String   @id @default(cuid())
-  firebaseUid String  @unique
-  email      String?  @unique
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                String            @id @default(cuid())
+  firebaseUid       String            @unique
+  email             String?           @unique
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  directChatsAsLow  Chat[]            @relation("DirectChatLowUser")
+  directChatsAsHigh Chat[]            @relation("DirectChatHighUser")
+  chatParticipants  ChatParticipant[]
+}
+
+model Chat {
+  id                String            @id @default(cuid())
+  directUserLowId   String
+  directUserHighId  String
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  directUserLow     User              @relation("DirectChatLowUser", fields: [directUserLowId], references: [id], onDelete: Cascade)
+  directUserHigh    User              @relation("DirectChatHighUser", fields: [directUserHighId], references: [id], onDelete: Cascade)
+  participants      ChatParticipant[]
+
+  @@unique([directUserLowId, directUserHighId], name: "directUserPair")
+  @@index([directUserLowId, createdAt])
+  @@index([directUserHighId, createdAt])
+}
+
+model ChatParticipant {
+  chatId   String
+  userId   String
+  joinedAt DateTime @default(now())
+  chat     Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+  @@index([userId, chatId])
 }

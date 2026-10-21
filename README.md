@@ -1,6 +1,6 @@
-# Chat Backend Assessment — Phase 1
+# Chat Backend Assessment — Phase 2
 
-Initial backend foundation only. This phase includes Express/TypeScript setup, validated configuration, Prisma/PostgreSQL, optional Firebase Admin initialization, request logging, centralized errors, and a database-aware health endpoint. No chat APIs are implemented.
+Backend foundation plus Phase 2 direct-chat creation and listing. Messaging is not implemented.
 
 ## Requirements
 
@@ -27,11 +27,32 @@ The sample `.env` values are placeholders. Create the database before applying t
 
 ```powershell
 npx prisma generate
-npx prisma migrate dev --name init
+npx prisma migrate dev
 npm run dev
 ```
 
-The API listens on `http://localhost:3000` by default. Set `PORT` in `.env` to change it. Check `GET http://localhost:3000/api/health`; it reports HTTP 200 when PostgreSQL is reachable and HTTP 503 when the database is unavailable.
+The checked-in migration is `20261021000000_phase2_chats`. `migrate dev` applies it to the configured database and records it in Prisma's migration history.
+
+The API listens on `http://localhost:3000` by default. Set `PORT` in `.env` to change it.
+
+## Phase 2 endpoints
+
+- `POST /api/chat/create` with JSON `{ "userAId": "...", "userBId": "..." }` creates or returns the same direct-chat ID. Both users must exist and must differ.
+- `GET /api/user/:userId/chats` returns `{ "chats": [{ "chatId": "...", "participantIds": ["...", "..."] }] }`. A valid user without chats receives an empty array.
+- `GET /api/health` checks API and PostgreSQL availability.
+
+Direct-chat user IDs are canonicalized, and PostgreSQL enforces both canonical ordering and a unique composite pair. Concurrent requests therefore converge on one row. Chat creation, participant insertion, and user validation run in one database transaction.
+
+## Verify
+
+```powershell
+npm test
+npm run build
+npm run lint
+npm run format:check
+```
+
+Route tests use an in-memory repository and do not require PostgreSQL. Applying the migration and exercising the real persistence layer do require a reachable PostgreSQL instance and valid credentials in `.env`.
 
 For a production build and run:
 
@@ -45,6 +66,7 @@ npm start
 - `npm run dev` — start the development server with watch mode
 - `npm run build` — generate Prisma Client and compile TypeScript
 - `npm start` — run the compiled server
+- `npm test` — run HTTP route tests using an isolated in-memory repository
 - `npm run lint` / `npm run lint:fix` — check/fix ESLint issues
 - `npm run format` / `npm run format:check` — format/check formatting
 - `npm run prisma:migrate -- --name <migration>` — create/apply a development migration
@@ -59,4 +81,4 @@ npm start
 - `src/types`, `src/utils`, `src/validators` — shared contracts and helpers
 - `prisma/schema.prisma` — PostgreSQL schema
 
-The initial Prisma schema provides a minimal user record for later Firebase identity integration; it does not expose authentication or chat endpoints.
+The migration creates users, direct chats, and chat participants. User records are assumed to be provisioned by a later authentication phase; this phase does not add user or messaging APIs.
