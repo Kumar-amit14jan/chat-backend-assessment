@@ -2,7 +2,7 @@
   "name": "chat-backend-assessment",
   "version": "1.0.0",
   "private": true,
-  "description": "Phase 2 direct-chat backend for the chat backend assessment",
+  "description": "TypeScript chat backend assessment with PostgreSQL and Firestore",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -15,6 +15,7 @@
     "format:check": "prettier --check .",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {

@@ -1,0 +1,148 @@
+{
+  "info": {
+    "name": "Chat Backend Assessment",
+    "description": "Six chat API endpoints plus health check. Configure collection variables before use. Client-provided IDs are test inputs only, not authentication.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "userAId", "value": "USER_A_ID" },
+    { "key": "userBId", "value": "USER_B_ID" },
+    { "key": "userId", "value": "USER_A_ID" },
+    { "key": "chatId", "value": "CHAT_ID" },
+    { "key": "messageId", "value": "MESSAGE_ID" },
+    { "key": "limit", "value": "50" },
+    { "key": "cursor", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Create or get direct chat",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userAId\": \"{{userAId}}\",\n  \"userBId\": \"{{userBId}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/chat/create",
+        "description": "Both users must already exist. Success: 200. Saves the returned chatId for subsequent requests."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Returns 200', function () { pm.response.to.have.status(200); });",
+              "if (pm.response.code === 200) { pm.collectionVariables.set('chatId', pm.response.json().chatId); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. List user's chats",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/user/{{userId}}/chats",
+        "description": "Success: 200. Requires an existing user ID."
+      }
+    },
+    {
+      "name": "3. Send message",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"senderId\": \"{{userId}}\",\n  \"text\": \"Hello from Postman\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/chat/{{chatId}}/message/send",
+        "description": "Success: 201. Saves messageId for read-receipt and last-seen requests."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Returns 201', function () { pm.response.to.have.status(201); });",
+              "if (pm.response.code === 201) { pm.collectionVariables.set('messageId', pm.response.json().messageId); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. List messages (first page or cursor page)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "x-user-id", "value": "{{userId}}" }],
+        "url": "{{baseUrl}}/api/chat/{{chatId}}/messages?limit={{limit}}",
+        "description": "Success: 200. Requires x-user-id. Copy nextCursor into the cursor variable to fetch another page."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const cursor = pm.collectionVariables.get('cursor');",
+              "if (cursor) { pm.request.url.query.upsert({ key: 'cursor', value: cursor }); } else { pm.request.url.query.remove('cursor'); }"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Returns 200', function () { pm.response.to.have.status(200); });",
+              "if (pm.response.code === 200) { pm.collectionVariables.set('cursor', pm.response.json().nextCursor || ''); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Mark message as read",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": \"{{userId}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/chat/{{chatId}}/message/{{messageId}}/read",
+        "description": "Success: 200. Repeat calls are idempotent and return the original readAt timestamp."
+      }
+    },
+    {
+      "name": "6. Advance last-seen",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"messageId\": \"{{messageId}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/api/chat/{{chatId}}/lastseen",
+        "description": "Success: 200. Older progress requests do not move last-seen backward."
+      }
+    },
+    {
+      "name": "Health check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/health",
+        "description": "Returns 200 when PostgreSQL is up or 503 when database health is degraded."
+      }
+    }
+  ]
+}
