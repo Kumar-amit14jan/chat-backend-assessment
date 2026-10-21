@@ -6,15 +6,16 @@ import { requestLogger } from './middleware/request-logger';
 import { createChatRouter } from './routes/chat.routes';
 import { createUserRouter } from './routes/user.routes';
 import { ChatService } from './services/chat.service';
+import { MessageService } from './services/message.service';
 
-export function createApp(chatService = new ChatService()) {
+export function createApp(chatService = new ChatService(), messageService = new MessageService()) {
   const app = express();
 
   app.disable('x-powered-by');
   app.use(requestLogger);
   app.use(express.json({ limit: '1mb' }));
   app.use('/api', apiRouter);
-  app.use('/api/chat', createChatRouter(chatService));
+  app.use('/api/chat', createChatRouter(chatService, messageService));
   app.use('/api/user', createUserRouter(chatService));
   app.use(notFoundHandler);
   app.use(errorHandler);

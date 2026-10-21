@@ -1,6 +1,6 @@
-# Chat Backend Assessment — Phase 2
+# Chat Backend Assessment — Phase 4
 
-Backend foundation plus Phase 2 direct-chat creation and listing. Messaging is not implemented.
+Backend foundation with direct chats, Firestore-backed messaging, read receipts, and last-seen progress. Group chats and delivery/read-receipt APIs beyond per-message read status are not implemented.
 
 ## Requirements
 
@@ -35,13 +35,47 @@ The checked-in migration is `20261021000000_phase2_chats`. `migrate dev` applies
 
 The API listens on `http://localhost:3000` by default. Set `PORT` in `.env` to change it.
 
-## Phase 2 endpoints
+## Chat and messaging endpoints
 
 - `POST /api/chat/create` with JSON `{ "userAId": "...", "userBId": "..." }` creates or returns the same direct-chat ID. Both users must exist and must differ.
 - `GET /api/user/:userId/chats` returns `{ "chats": [{ "chatId": "...", "participantIds": ["...", "..."] }] }`. A valid user without chats receives an empty array.
+- `POST /api/chat/:chatId/message/send` with JSON `{ "senderId": "...", "text": "Hello" }` stores the trimmed message in Firestore and returns `{ "messageId": "...", "timestamp": "..." }`.
+- `GET /api/chat/:chatId/messages?limit=50&cursor=...` requires an `x-user-id` header. It returns chronological messages plus `nextCursor`; limit is 1–100 and timestamp ties are ordered by Firestore document ID.
+- `POST /api/chat/:chatId/message/:messageId/read` with JSON `{ "userId": "..." }` stores an idempotent per-user receipt at `chats/{chatId}/messages/{messageId}/readReceipts/{encodedUserId}`.
+- `POST /api/chat/:chatId/lastseen` with JSON `{ "userId": "...", "messageId": "..." }` advances the user's Firestore last-seen state. Transactions prevent progress from moving backward; ties use message ID ordering.
 - `GET /api/health` checks API and PostgreSQL availability.
 
 Direct-chat user IDs are canonicalized, and PostgreSQL enforces both canonical ordering and a unique composite pair. Concurrent requests therefore converge on one row. Chat creation, participant insertion, and user validation run in one database transaction.
+
+Message documents are stored only in Firestore under `chats/{chatId}/messages`; message bodies, receipts, and last-seen state are not persisted in PostgreSQL. Firebase Admin is configured through the optional service-account environment values described above. For the list endpoint, `x-user-id` is expected to be set by a trusted authentication layer; this project does not yet add authentication middleware.
+
+Example requests:
+
+```http
+POST /api/chat/CHAT_ID/message/send
+Content-Type: application/json
+
+{"senderId":"USER_ID","text":"Hello"}
+```
+
+```http
+GET /api/chat/CHAT_ID/messages?limit=50
+x-user-id: USER_ID
+```
+
+```http
+POST /api/chat/CHAT_ID/message/MESSAGE_ID/read
+Content-Type: application/json
+
+{"userId":"USER_ID"}
+```
+
+```http
+POST /api/chat/CHAT_ID/lastseen
+Content-Type: application/json
+
+{"userId":"USER_ID","messageId":"MESSAGE_ID"}
+```
 
 ## Verify
 
@@ -66,7 +100,7 @@ npm start
 - `npm run dev` — start the development server with watch mode
 - `npm run build` — generate Prisma Client and compile TypeScript
 - `npm start` — run the compiled server
-- `npm test` — run HTTP route tests using an isolated in-memory repository
+- `npm test` — run HTTP route tests using isolated in-memory repositories
 - `npm run lint` / `npm run lint:fix` — check/fix ESLint issues
 - `npm run format` / `npm run format:check` — format/check formatting
 - `npm run prisma:migrate -- --name <migration>` — create/apply a development migration
@@ -81,4 +115,4 @@ npm start
 - `src/types`, `src/utils`, `src/validators` — shared contracts and helpers
 - `prisma/schema.prisma` — PostgreSQL schema
 
-The migration creates users, direct chats, and chat participants. User records are assumed to be provisioned by a later authentication phase; this phase does not add user or messaging APIs.
+The migration creates users, direct chats, and chat participants. User records are assumed to be provisioned by an authentication phase; this project does not implement authentication, group chats, or messaging features beyond direct-chat messages, read receipts, and last-seen progress.

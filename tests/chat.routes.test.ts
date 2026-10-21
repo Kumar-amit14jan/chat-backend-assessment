@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../src/app';
 import type {
+  ChatAccess,
   ChatRepositoryContract,
   CreateDirectChatResult,
   UserChatSummary,
@@ -41,6 +42,12 @@ class MemoryChatRepository implements ChatRepositoryContract {
   async listUserChats(userId: string): Promise<UserChatSummary[]> {
     if (!this.users.has(userId)) throw new UserNotFoundError([userId]);
     return [...this.chats.values()].filter((chat) => chat.participantIds.includes(userId));
+  }
+
+  async getChatAccess(chatId: string, userId: string): Promise<ChatAccess> {
+    const chat = this.chats.get(chatId);
+    if (!chat) return 'chat-not-found';
+    return chat.participantIds.includes(userId) ? 'participant' : 'not-a-participant';
   }
 }
 

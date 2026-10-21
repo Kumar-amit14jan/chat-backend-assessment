@@ -13,9 +13,12 @@ export interface UserChatSummary {
   createdAt: Date;
 }
 
+export type ChatAccess = 'chat-not-found' | 'not-a-participant' | 'participant';
+
 export interface ChatRepositoryContract {
   createOrGetDirectChat(userLowId: string, userHighId: string): Promise<CreateDirectChatResult>;
   listUserChats(userId: string): Promise<UserChatSummary[]>;
+  getChatAccess(chatId: string, userId: string): Promise<ChatAccess>;
 }
 
 export class ChatRepository implements ChatRepositoryContract {
@@ -92,5 +95,18 @@ export class ChatRepository implements ChatRepositoryContract {
         createdAt: chat.createdAt,
       }));
     });
+  }
+
+  async getChatAccess(chatId: string, userId: string): Promise<ChatAccess> {
+    const chat = await prisma.chat.findUnique({
+      where: { id: chatId },
+      select: {
+        id: true,
+        participants: { where: { userId }, select: { userId: true }, take: 1 },
+      },
+    });
+
+    if (!chat) return 'chat-not-found';
+    return chat.participants.length > 0 ? 'participant' : 'not-a-participant';
   }
 }
